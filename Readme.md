@@ -13,7 +13,7 @@
 - Member 2: [Nafeesath Shamsudheen] - [RCET-Akkikavu]
 
 ### Hosted Project Link
-[mention your project hosted link here]
+[ https://aysha-shafeeque.github.io/ayna-tink-her-hack-4.0/]
 
 ### Project Description
 [Planyx – Smart Study Planner
