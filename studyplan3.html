@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planyx</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+:root {
+    --bg: #f2f6fa;
+    --card: #ffffff;
+    --text: #2c3e50;
+    --accent: #3498db;
+}
+
+body.dark {
+    --bg: #121212;
+    --card: #1e1e1e;
+    --text: #f1f1f1;
+}
+
+body {
+    margin:0;
+    padding:20px;
+    font-family:'Inter',sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    transition:0.3s;
+}
+
+.container {
+    max-width:1100px;
+    margin:auto;
+}
+
+h1 {
+    text-align:center;
+    font-weight:700;
+}
+
+input,select,button {
+    padding:8px;
+    margin-top:5px;
+    border-radius:6px;
+    border:none;
+    font-family:'Inter',sans-serif;
+}
+
+button {
+    cursor:pointer;
+    transition:0.2s ease;
+}
+
+button:hover {
+    transform:translateY(-2px);
+    box-shadow:0 4px 10px rgba(0,0,0,0.15);
+}
+
+button:active {
+    transform:scale(0.96);
+}
+
+.primary {
+    background:var(--accent);
+    color:white;
+}
+
+.calendar {
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:10px;
+    margin-top:20px;
+}
+
+.day-block {
+    background:var(--card);
+    padding:10px;
+    border-radius:10px;
+    min-height:200px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.1);
+    transition:0.3s;
+}
+
+.day-title {
+    font-weight:600;
+}
+
+.subject-card {
+    padding:6px;
+    border-radius:6px;
+    margin-top:6px;
+    color:white;
+    display:flex;
+    flex-direction:column;
+    transition:0.3s;
+}
+
+.subject-card:hover {
+    transform:scale(1.02);
+}
+
+.easy { background:#2ecc71; }
+.medium { background:#f39c12; }
+.hard { background:#e74c3c; }
+
+.timer {
+    font-size:12px;
+    margin-top:4px;
+}
+
+.controls {
+    display:flex;
+    gap:4px;
+    margin-top:4px;
+}
+
+.completed {
+    opacity:0.5;
+}
+.active {
+    outline:2px solid #00ffff;
+}
+
+.progress-bar {
+    height:8px;
+    background:#ddd;
+    border-radius:6px;
+    margin-top:6px;
+    overflow:hidden;
+}
+
+.progress-fill {
+    height:100%;
+    background:#00c3ff;
+    width:0%;
+    transition:0.4s ease;
+}
+
+.overall-progress {
+    margin-top:15px;
+    font-weight:600;
+}
+
+.toggle {
+    float:right;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>Planyx</h1>
+
+<button class="toggle primary" onclick="toggleDark()">Toggle Dark Mode</button>
+
+<label>Max Study Hours Per Day</label>
+<input type="number" id="maxHours" value="5" min="1" max="12">
+
+<div id="subjectsContainer">
+    <div class="subject-entry">
+        <input type="text" placeholder="Subject name">
+        <input type="date">
+        <select>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+        </select>
+    </div>
+</div>
+
+<button class="primary" onclick="addSubject()">Add Subject</button>
+<button class="primary" onclick="generateCalendar()">Generate Calendar</button>
+<button class="primary" onclick="downloadPDF()">Download PDF</button>
+
+<div class="overall-progress" id="overallProgress">Overall Completion: 0%</div>
+
+<div id="calendar" class="calendar"></div>
+</div>
+
+<script>
+let activeTimer=null;
+let interval=null;
+let remainingTime=0;
+let progress=JSON.parse(localStorage.getItem("progress"))||{};
+let dark=localStorage.getItem("darkMode")==="true";
+
+if(dark) document.body.classList.add("dark");
+
+function toggleDark(){
+    document.body.classList.toggle("dark");
+    localStorage.setItem("darkMode",document.body.classList.contains("dark"));
+}
+
+function saveProgress(){
+    localStorage.setItem("progress",JSON.stringify(progress));
+}
+
+function addSubject(){
+    const div=document.createElement("div");
+    div.className="subject-entry";
+    div.innerHTML=`
+        <input type="text" placeholder="Subject name">
+        <input type="date">
+        <select>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+        </select>
+    `;
+    document.getElementById("subjectsContainer").appendChild(div);
+}
+
+function getWeight(diff){
+    return diff==="easy"?1:diff==="medium"?2:3;
+}
+
+function format(sec){
+    const h=Math.floor(sec/3600);
+    const m=Math.floor((sec%3600)/60);
+    const s=sec%60;
+    return h+"h "+m+"m "+s+"s";
+}
+
+function updateOverallProgress(){
+    const total=document.querySelectorAll(".subject-card").length;
+    const done=document.querySelectorAll(".subject-card.completed").length;
+    const percent=total?Math.round((done/total)*100):0;
+    document.getElementById("overallProgress").innerText="Overall Completion: "+percent+"%";
+}
+
+function generateCalendar(){
+    const maxHours=parseFloat(document.getElementById("maxHours").value)||5;
+    const maxMinutes=maxHours*60;
+
+    let today=new Date();
+    today.setHours(0,0,0,0);
+
+    const entries=document.querySelectorAll(".subject-entry");
+    let subjects=[];
+    let maxDate=new Date(today);
+
+    for(const e of entries){
+        const name=e.children[0].value.trim();
+        const dateVal=e.children[1].value;
+        const diff=e.children[2].value;
+
+        const date=new Date(dateVal);
+        date.setHours(0,0,0,0);
+
+        if(!name||!dateVal||isNaN(date)){
+            alert("Fill properly");
+            return;
+        }
+
+        subjects.push({name,date,diff});
+        if(date>maxDate) maxDate=date;
+    }
+
+    const totalDays=Math.ceil((maxDate-today)/86400000);
+    const cal=document.getElementById("calendar");
+    cal.innerHTML="";
+
+    for(let i=0;i<=totalDays;i++){
+        const current=new Date(today.getTime()+i*86400000);
+        const keyDate=current.toISOString().split("T")[0];
+
+        const day=document.createElement("div");
+        day.className="day-block";
+
+        const title=document.createElement("div");
+        title.className="day-title";
+        title.innerText=current.toDateString();
+        day.appendChild(title);
+
+        const active=subjects.filter(s=>current<=s.date);
+        if(active.length===0){
+            day.innerHTML+="<div>Rest Day</div>";
+            cal.appendChild(day);
+            continue;
+        }
+
+        let totalScore=0;
+        let scores=[];
+
+        active.forEach(s=>{
+            const daysLeft=Math.ceil((s.date-current)/86400000)+1;
+            const urgency=1+(5/daysLeft);
+            const score=getWeight(s.diff)*urgency;
+            scores.push({subject:s,score});
+            totalScore+=score;
+        });
+
+        let allocated=0;
+        let dailyTotal=0;
+        let dailyDone=0;
+
+        scores.forEach((item,index)=>{
+            let minutes=index===scores.length-1?
+                maxMinutes-allocated:
+                Math.round((item.score/totalScore)*maxMinutes);
+
+            allocated+=minutes;
+            dailyTotal++;
+
+            const key=keyDate+"_"+item.subject.name;
+            const done=progress[key];
+            if(done) dailyDone++;
+
+            const card=document.createElement("div");
+            card.className="subject-card "+item.subject.diff;
+            if(done) card.classList.add("completed");
+
+            const label=document.createElement("div");
+            label.innerText=item.subject.name+" ("+minutes+" min)";
+
+            const timer=document.createElement("div");
+            timer.className="timer";
+            timer.innerText=done?"Completed":"0h 0m 0s";
+
+            const controls=document.createElement("div");
+            controls.className="controls";
+
+            const startBtn=document.createElement("button");
+            startBtn.innerText="Start";
+
+            const pauseBtn=document.createElement("button");
+            pauseBtn.innerText="Pause";
+
+            const resetBtn=document.createElement("button");
+            resetBtn.innerText="Reset";
+
+            startBtn.onclick=()=>{
+                if(activeTimer&&activeTimer!==key){
+                    alert("Another timer running");
+                    return;
+                }
+                startTimer(key,minutes*60,timer,card);
+            };
+
+            pauseBtn.onclick=()=>{
+                if(activeTimer===key){
+                    clearInterval(interval);
+                    interval=null;
+                }
+            };
+
+            resetBtn.onclick=()=>{
+                if(activeTimer===key){
+                    clearInterval(interval);
+                    interval=null;
+                }
+                remainingTime=0;
+                timer.innerText="0h 0m 0s";
+                card.classList.remove("active");
+            };
+
+            controls.appendChild(startBtn);
+            controls.appendChild(pauseBtn);
+            controls.appendChild(resetBtn);
+
+            card.appendChild(label);
+            card.appendChild(timer);
+            card.appendChild(controls);
+
+            day.appendChild(card);
+        });
+
+        const progressBar=document.createElement("div");
+        progressBar.className="progress-bar";
+        const fill=document.createElement("div");
+        fill.className="progress-fill";
+        const percent=dailyTotal?Math.round((dailyDone/dailyTotal)*100):0;
+        fill.style.width=percent+"%";
+        progressBar.appendChild(fill);
+        day.appendChild(progressBar);
+
+        cal.appendChild(day);
+    }
+
+    updateOverallProgress();
+}
+
+function startTimer(key,totalSeconds,display,card){
+    activeTimer=key;
+    remainingTime=remainingTime||totalSeconds;
+    card.classList.add("active");
+
+    interval=setInterval(()=>{
+        display.innerText=format(remainingTime);
+        remainingTime--;
+
+        if(remainingTime<0){
+            clearInterval(interval);
+            interval=null;
+            progress[key]=true;
+            saveProgress();
+            display.innerText="Completed";
+            card.classList.remove("active");
+            card.classList.add("completed");
+            activeTimer=null;
+            remainingTime=0;
+            updateOverallProgress();
+        }
+    },1000);
+}
+
+function downloadPDF(){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const blocks = document.querySelectorAll(".day-block");
+
+    let y = 20;
+
+    blocks.forEach(block=>{
+        if(y>270){
+            doc.addPage();
+            y=20;
+        }
+
+        doc.setFontSize(12);
+        doc.text(block.querySelector(".day-title").innerText, 10, y);
+        y+=8;
+
+        const subjects=block.querySelectorAll(".subject-card");
+        subjects.forEach(sub=>{
+            doc.setFontSize(10);
+            doc.text("- "+sub.firstChild.innerText, 15, y);
+            y+=6;
+        });
+
+        y+=6;
+    });
+
+    doc.save("Planyx.pdf");
+}
+</script>
+
+</body>
+</html>
